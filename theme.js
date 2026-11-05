@@ -1,31 +1,56 @@
 'use strict';
 (() => {
   const KEY = 'classroom-21-theme';
-  const validThemes = new Set(['default', 'chiikawa']);
+  const ASSIGNMENTS_KEY = 'classroom-21-shinchan-profiles-v1';
+  const validThemes = new Set(['default', 'chiikawa', 'shinchan']);
   const selector = document.querySelector('#theme-select');
   const studentList = document.querySelector('#students');
-  // 원본 PNG를 수정하지 않고 SVG viewBox로 세 캐릭터를 나누어 표시합니다.
-  const characters = [
-    {name: '치이카와', viewBox: '35 235 335 330'},
-    {name: '하치와레', viewBox: '385 190 355 365'},
-    {name: '우사기', viewBox: '755 35 370 440'}
-  ];
+  const chiikawa = {
+    src: 'assets/chiikawa-characters.png', width: 1126, height: 660,
+    viewBoxes: ['35 235 335 330', '385 190 355 365', '755 35 370 440']
+  };
+  const shinchan = {"width": 2172, "height": 724, "viewBoxes": ["77 197 356 433", "493 199 334 429", "923 152 329 480", "1334 196 332 432", "1778 135 316 497"], "src": "assets/shinchan-characters.png"};
+  const assignments = new Map();
+  try {
+    const saved = JSON.parse(localStorage.getItem(ASSIGNMENTS_KEY) || '{}');
+    if (saved && typeof saved === 'object' && !Array.isArray(saved)) {
+      for (const [id, value] of Object.entries(saved)) {
+        if (Number.isInteger(value) && value >= 0 && value < shinchan.viewBoxes.length) assignments.set(id, value);
+      }
+    }
+  } catch { /* 저장된 배정표가 없거나 손상되면 새로 배정 */ }
   function decorateAvatars() {
-    if (document.documentElement.dataset.theme !== 'chiikawa' || !studentList) return;
+    const theme = document.documentElement.dataset.theme;
+    if (!studentList || theme === 'default') return;
+    const atlas = theme === 'shinchan' ? shinchan : chiikawa;
+    let assignmentsChanged = false;
     studentList.querySelectorAll('.avatar-character').forEach(slot => {
-      if (slot.firstElementChild) return;
-      const character = characters[Number(slot.dataset.character) % characters.length];
+      if (slot.dataset.renderedTheme === theme && slot.firstElementChild) return;
+      let index;
+      if (theme === 'shinchan') {
+        const id = slot.closest('.student')?.dataset.id;
+        if (!id) return;
+        if (!assignments.has(id)) {
+          assignments.set(id, Math.floor(Math.random() * atlas.viewBoxes.length));
+          assignmentsChanged = true;
+        }
+        index = assignments.get(id);
+      } else index = Number(slot.dataset.character) % atlas.viewBoxes.length;
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', character.viewBox);
+      svg.setAttribute('viewBox', atlas.viewBoxes[index]);
       svg.setAttribute('preserveAspectRatio', 'xMidYMax meet');
       svg.setAttribute('aria-hidden', 'true');
       const img = document.createElementNS('http://www.w3.org/2000/svg', 'image');
-      img.setAttribute('href', 'assets/chiikawa-characters.png');
-      img.setAttribute('width', '1126');
-      img.setAttribute('height', '660');
+      img.setAttribute('href', atlas.src);
+      img.setAttribute('width', String(atlas.width));
+      img.setAttribute('height', String(atlas.height));
       svg.append(img);
-      slot.append(svg);
+      slot.replaceChildren(svg);
+      slot.dataset.renderedTheme = theme;
     });
+    if (assignmentsChanged) {
+      try { localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify(Object.fromEntries(assignments))); } catch { /* 현재 페이지 배정은 유지 */ }
+    }
   }
   function applyTheme(value, save = false) {
     const theme = validThemes.has(value) ? value : 'default';
@@ -41,5 +66,17 @@
   applyTheme(initial);
   selector?.addEventListener('change', () => applyTheme(selector.value, true));
   if (studentList) new MutationObserver(decorateAvatars).observe(studentList, {childList: true});
-  window.addEventListener('storage', event => {if (event.key === KEY) applyTheme(event.newValue);});
+  window.addEventListener('storage', event => {
+    if (event.key === KEY) applyTheme(event.newValue);
+    if (event.key === ASSIGNMENTS_KEY) {
+      try {
+        const saved = JSON.parse(event.newValue || '{}');
+        if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return;
+        assignments.clear();
+        for (const [id, value] of Object.entries(saved)) if (Number.isInteger(value) && value >= 0 && value < shinchan.viewBoxes.length) assignments.set(id, value);
+        studentList?.querySelectorAll('.avatar-character').forEach(slot => {delete slot.dataset.renderedTheme;});
+        decorateAvatars();
+      } catch { /* 다른 탭의 손상된 배정표 무시 */ }
+    }
+  });
 })();
